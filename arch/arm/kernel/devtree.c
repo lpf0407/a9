@@ -236,7 +236,7 @@ const struct machine_desc * __init setup_machine_fdt(unsigned int dt_phys)
 
 		dump_machine_table(); /* does not return */
 	}
-	early_print("setup_machine_fdt=====%s\n",mdesc->dt_compat);
+	early_print("setup_machine_fdt=====%s\n",mdesc->dt_compat[0]);
 
 	/* We really don't want to do this, but sometimes firmware provides buggy data */
 	if (mdesc->dt_fixup)

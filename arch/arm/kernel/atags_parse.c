@@ -188,7 +188,6 @@ setup_machine_tags(phys_addr_t __atags_pointer, unsigned int machine_nr)
 
 	default_tags.mem.start = PHYS_OFFSET;
 
-	machine_nr= 2272;
 	/*
 	 * locate machine in the list of supported machines.
 	 */

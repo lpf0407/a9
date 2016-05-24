@@ -198,12 +198,19 @@ char *parse_args(const char *doing,
 		int irq_was_disabled;
 
 		args = next_arg(args, &param, &val);
+		//if(strcmp(param,"console")==0)
+		//early_print("=====%s",param);
 		/* Stop at -- */
 		if (!val && strcmp(param, "--") == 0)
 			return args;
 		irq_was_disabled = irqs_disabled();
 		ret = parse_one(param, val, doing, params, num,
 				min_level, max_level, unknown);
+		
+		if(strcmp(param,"console"))
+		{
+		printk("-----------%s-----------param=%s-------val=%s\n",__FUNCTION__,param,val);
+		}
 		if (irq_was_disabled && !irqs_disabled())
 			pr_warn("%s: option '%s' enabled irq's!\n",
 				doing, param);
