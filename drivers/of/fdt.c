@@ -92,10 +92,13 @@ int of_fdt_is_compatible(const void *blob,
 	unsigned long l, score = 0;
 
 	cp = fdt_getprop(blob, node, "compatible", &cplen);
+
+	early_print("--cplen=%d--cp=%s===========%s\n",cplen,cp,__FUNCTION__);
 	if (cp == NULL)
 		return 0;
 	while (cplen > 0) {
 		score++;
+		early_print("----score=%d--compat=%s==cplen=%d==cp=%s==%s\n",score,compat,cplen,cp,__FUNCTION__);
 		if (of_compat_cmp(cp, compat, strlen(compat)) == 0)
 			return score;
 		l = strlen(cp) + 1;
