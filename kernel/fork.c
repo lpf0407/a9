@@ -302,21 +302,21 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	int node = tsk_fork_get_node(orig);
 	int err;
 
-	tsk = alloc_task_struct_node(node);
+	tsk = alloc_task_struct_node(node);//分配tast_strcut
 	if (!tsk)
 		return NULL;
 
-	ti = alloc_thread_info_node(tsk, node);
+	ti = alloc_thread_info_node(tsk, node);//分配内核栈，thread_info在栈的底部
 	if (!ti)
 		goto free_tsk;
 
-	err = arch_dup_task_struct(tsk, orig);
+	err = arch_dup_task_struct(tsk, orig);//复制父进程的task_strcut
 	if (err)
 		goto free_ti;
 
-	tsk->stack = ti;
+	tsk->stack = ti;//设置子进程栈
 
-	setup_thread_stack(tsk, orig);
+	setup_thread_stack(tsk, orig);//cp父进程的thread_info
 	clear_user_return_notifier(tsk);
 	clear_tsk_need_resched(tsk);
 	stackend = end_of_stack(tsk);
@@ -1191,7 +1191,8 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		goto fork_out;
 
 	retval = -ENOMEM;
-	p = dup_task_struct(current);
+	p = dup_task_struct(current);//cp父进程的tast_struct,thread_info
+
 	if (!p)
 		goto fork_out;
 

@@ -85,11 +85,13 @@ ENDPROC(ret_to_user)
  */
 ENTRY(ret_from_fork)
 	bl	schedule_tail
+	/*thread->cpu_context.r4 = stk_sz;内核线程函数的参数*/
+	/*thread->cpu_context.r5 = stack_start;内核线程函数的地址*/
 	cmp	r5, #0
 	movne	r0, r4
 	adrne	lr, BSYM(1f)
 	movne	pc, r5
-1:	get_thread_info tsk
+1:	get_thread_info tsk   @entry-header.S tsk .req   r9     current thread_info 
 	b	ret_slow_syscall
 ENDPROC(ret_from_fork)
 

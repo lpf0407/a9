@@ -179,10 +179,10 @@
  * Get current thread_info.
  */
 	.macro	get_thread_info, rd
- ARM(	mov	\rd, sp, lsr #13	)
+ ARM(	mov	\rd, sp, lsr #13	)@//右移13位
  THUMB(	mov	\rd, sp			)
  THUMB(	lsr	\rd, \rd, #13		)
-	mov	\rd, \rd, lsl #13
+	mov	\rd, \rd, lsl #13@//左移13bit，清除13bit取得thread_info地址
 	.endm
 
 /*

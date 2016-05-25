@@ -221,9 +221,9 @@
 	.endm
 
 	.macro	restore_user_regs, fast = 0, offset = 0
-	ldr	r1, [sp, #\offset + S_PSR]	@ get calling cpsr
-	ldr	lr, [sp, #\offset + S_PC]!	@ get pc
-	msr	spsr_cxsf, r1			@ save in spsr_svc
+	ldr	r1, [sp, #\offset + S_PSR]	@ get calling cpsr 即为被中断时、系统调用，处理器的cpsr值
+	ldr	lr, [sp, #\offset + S_PC]!	@ get pc即为被中断指令的、系统调用，下一条指令 
+	msr	spsr_cxsf, r1			@ save in spsr_svc @将r1赋值给管理模式下的spsr_svc，这样在movs时，会自动将该值赋值为cpsr  
 #if defined(CONFIG_CPU_V6)
 	strex	r1, r2, [sp]			@ clear the exclusive monitor
 #elif defined(CONFIG_CPU_32v6K)
@@ -232,11 +232,11 @@
 	.if	\fast
 	ldmdb	sp, {r1 - lr}^			@ get calling r1 - lr
 	.else
-	ldmdb	sp, {r0 - lr}^			@ get calling r0 - lr
+	ldmdb	sp, {r0 - lr}^			@ get calling r0 - lr 将用户态下的寄存器的值恢复
 	.endif
 	mov	r0, r0				@ ARMv5T and earlier require a nop
 						@ after ldm {}^
-	add	sp, sp, #S_FRAME_SIZE - S_PC
+	add	sp, sp, #S_FRAME_SIZE - S_PC   @//恢复内核栈到中断产生之前的位置。
 	movs	pc, lr				@ return & move spsr_svc into cpsr
 	.endm
 
