@@ -189,7 +189,7 @@ irqreturn_t handle_irq_event(struct irq_desc *desc)
 	irqd_set(&desc->irq_data, IRQD_IRQ_INPROGRESS);
 	raw_spin_unlock(&desc->lock);
 
-	ret = handle_irq_event_percpu(desc, action);
+	ret = handle_irq_event_percpu(desc, action);//遍历action list，调用specific handler
 
 	raw_spin_lock(&desc->lock);
 	irqd_clear(&desc->irq_data, IRQD_IRQ_INPROGRESS);

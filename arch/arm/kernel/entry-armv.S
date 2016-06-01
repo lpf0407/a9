@@ -37,9 +37,9 @@
  */
 	.macro	irq_handler
 #ifdef CONFIG_MULTI_IRQ_HANDLER
-	ldr	r1, =handle_arch_irq
-	mov	r0, sp
-	adr	lr, BSYM(9997f)
+	ldr	r1, =handle_arch_irq @
+	mov	r0, sp @设定传递给machine定义的handle_arch_irq的参数
+	adr	lr, BSYM(9997f) @设定返回地址
 	ldr	pc, [r1]
 #else
 	arch_irq_handler_default
@@ -150,6 +150,7 @@ ENDPROC(__und_invalid)
  UNWIND(.fnstart		)
  UNWIND(.save {r0 - pc}		)
 	sub	sp, sp, #(S_FRAME_SIZE + \stack_hole - 4)
+	@sp指向struct pt_regs中r1的位置
 #ifdef CONFIG_THUMB2_KERNEL
  SPFIX(	str	r0, [sp]	)	@ temporarily saved
  SPFIX(	mov	r0, sp		)
@@ -160,16 +161,22 @@ ENDPROC(__und_invalid)
 #endif
  SPFIX(	subeq	sp, sp, #4	)
 	stmia	sp, {r1 - r12}
+	@寄存器入栈
 
 	ldmia	r0, {r3 - r5}
+	@将irq栈的值加载到{r3-r5}
 	add	r7, sp, #S_SP - 4	@ here for interlock avoidance
+	@r7指向struct pt_regs中r12的位置
 	mov	r6, #-1			@  ""  ""      ""       ""
 	add	r2, sp, #(S_FRAME_SIZE + \stack_hole - 4)
+	@r2是发现中断那一刻stack的现场
  SPFIX(	addeq	r2, r2, #4	)
 	str	r3, [sp, #-4]!		@ save the "real" r0 copied
 					@ from the exception stack
+					@保存r0，注意有一个！，sp会加上4，这时候sp就指向栈顶的r0位置了
 
 	mov	r3, lr
+	@保存svc mode的lr到r3
 
 	@
 	@ We are now ready to fill in the remaining blanks on the stack:
@@ -181,6 +188,7 @@ ENDPROC(__und_invalid)
 	@  r6 - orig_r0 (see pt_regs definition in ptrace.h)
 	@
 	stmia	r7, {r2 - r6}
+	@压栈，在栈上形成形成struct pt_regs
 
 #ifdef CONFIG_TRACE_IRQFLAGS
 	bl	trace_hardirqs_off
@@ -318,11 +326,61 @@ ENDPROC(__pabt_svc)
  UNWIND(.fnstart	)
  UNWIND(.cantunwind	)	@ don't unwind the user space
 	sub	sp, sp, #S_FRAME_SIZE
+	@代码执行到这里的时候，ARM处理已
+	@经切换到了SVC mode。一旦进入
+	@SVC mode，ARM处理器看到的寄存器
+	@已经发生变化，这里的sp已经变成了
+	@sp_svc了。因此，后续的压栈操作都
+	@是压入了发生中断那一刻的进程的（或
+	@者内核线程）内核栈（svc mode栈）。
+	@具体保存多少个寄存器值？S_FRAME_SIZE
+	@已经给出了答案，这个值是18个寄存器。
+	@r0～r15再加上CPSR也只有17个而已。先保留这个疑问，我们稍后回答。
  ARM(	stmib	sp, {r1 - r12}	)
+	@压栈首先压入了r1～r12，这里为何不处
+	@理r0？因为r0在irq mode切到svc mode
+	@的时候被污染了，不过，原始的r0被保
+	@存的irq mode的stack上了。r13（sp）和r14（lr）
+	@需要保存吗，当然需要，稍后再保存。执行到这里，内核栈的布局
+	@stmib中的ib表示increment before，因此，在压入R1的时候，
+	@stack pointer会先增加4，重要是预留r0的位置。
+	@stmib    sp, {r1 - r12}指令中的sp没有“！”的修饰符，表示压栈完成后并不会真正更新stack pointer，因此sp保持原来的值。
  THUMB(	stmia	sp, {r0 - r12}	)
 
 	ldmia	r0, {r3 - r5}
+	@这里r0指向了irq stack，因此，r3是中断时候的r0值，r4是中断现场的PC值，r5是中断现场的CPSR值。
 	add	r0, sp, #S_PC		@ here for interlock avoidance
+	@把r0赋值为S_PC的值,
+	
+	@ARM_r0 
+	@ARM_r1 
+	@ARM_r2 
+	@ARM_r3 
+	@ARM_r4 
+	@ARM_r5 
+	@ARM_r6 
+	@ARM_r7 
+	@ARM_r8 
+	@ARM_r9 
+	@ARM_r10 
+	@ARM_fp 
+	@ARM_ip 
+	@ARM_sp  
+	@ARM_lr 
+	@ARM_pc<---------add    r0, sp, #S_PC指令使得r0指向了这个位置 
+	@ARM_cpsr 
+	@ARM_ORIG_r0
+
+	@硬件上下文的寄存器中r0有两份，ARM_r0是传递的参数，并复制一份到ARM_ORIG_r0，当系统调用返回的时候，ARM_r0是系统调用的返回值。
+	@在中断处理过程中，没有使用ARM_ORIG_r0这个值，但是，为了防止system call restart，可以赋值为非系统调用号的值（例如-1）
+	@r0有两个作用，传递参数，返回结果。当把系统调用的结果放到r0的时候，通过r0传递的参数值就被覆盖了
+	@但是有些场合是需要需要这两个值的：
+	@1、ptrace （和debugger相关)
+	@2、system call restart （和signal相关)
+
+
+	@为什么要给r0赋值？因此kernel不想修改sp的值，保持sp指向栈顶
+
 	mov	r6, #-1			@  ""  ""     ""        ""
 
 	str	r3, [sp]		@ save the "real" r0 copied
@@ -339,6 +397,7 @@ ENDPROC(__pabt_svc)
 	@
 	stmia	r0, {r4 - r6}
  ARM(	stmdb	r0, {sp, lr}^			)
+	@将sp和lr压入stack中的剩余的两个位置。需要注意的是，我们保存的是发生中断那一刻（这是当时user mode的sp和lr），指令中的“^”符号表示访问user mode的寄存器。
  THUMB(	store_user_sp_lr r0, r1, S_SP - S_PC	)
 
 	@
@@ -386,11 +445,16 @@ ENDPROC(__dabt_usr)
 	.align	5
 __irq_usr:
 	usr_entry
+	@保存用户现场的描述 
 	kuser_cmpxchg_check
 	irq_handler
+	@核心处理内容
 	get_thread_info tsk
+	@sk是r9，指向当前的thread info数据结构 
 	mov	why, #0
+	@why是r8 
 	b	ret_to_user_from_irq
+	@中断返回
  UNWIND(.fnend		)
 ENDPROC(__irq_usr)
 
@@ -971,7 +1035,7 @@ vector_\name:
 	.if \correction
 	sub	lr, lr, #\correction
 	.endif
-
+	@eg:irq lr=lr-4 返回地址
 	@
 	@ Save r0, lr_<exception> (parent PC) and spsr_<exception>
 	@ (parent CPSR)
@@ -991,11 +1055,17 @@ vector_\name:
 	@ the branch table must immediately follow this code
 	@
 	and	lr, lr, #0x0f
+	@lr保存了发生IRQ时候的CPSR，通过and操作，可以获取CPSR.M[3:0]的值
  THUMB(	adr	r0, 1f			)
+	@根据当前PC值，获取lable 1的地址
  THUMB(	ldr	lr, [r0, lr, lsl #2]	)
+	@lr根据当前mode，要么是__irq_usr的地址 ，要么是__irq_svc的地址
 	mov	r0, sp
+	@将irq mode的stack point通过r0传递给即将跳转的函数
  ARM(	ldr	lr, [pc, lr, lsl #2]	)
+	@根据mode，给lr赋值，__irq_usr或者__irq_svc
 	movs	pc, lr			@ branch to handler in SVC mode
+	@movs中‘s’的含义）：把SPSR copy到CPSR，从而实现了模式的切换
 ENDPROC(vector_\name)
 
 	.align	2

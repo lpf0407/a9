@@ -339,6 +339,9 @@ static bool irq_check_poll(struct irq_desc *desc)
 {
 	if (!(desc->istate & IRQS_POLL_INPROGRESS))
 		return false;
+	//IRQS_POLL_INPROGRESS标识了该IRQ正在被polling
+	//如果没有被轮询，那么返回false，进行正常的设定pending标记、mask and ack中断。
+	//如果正在被轮询，那么需要等待poll结束。
 	return irq_wait_for_poll(desc);
 }
 
@@ -547,7 +550,14 @@ handle_edge_irq(unsigned int irq, struct irq_desc *desc)
 	 */
 	if (unlikely(irqd_irq_disabled(&desc->irq_data) ||
 		     irqd_irq_inprogress(&desc->irq_data) || !desc->action)) {
+		//a、该中断事件已经被其他的CPU处理了
+		//b、该中断被其他的CPU disable了
+		//c、该中断描述符没有注册specific handler。这个比较简单，如果没有irqaction，根本没有必要调用action list的处理
 		if (!irq_check_poll(desc)) {
+			//如果该中断事件已经被其他的CPU处理了，那么我们仅仅是设定pending状态（为了委托正在处理的该中断的那个CPU进行处理),
+			//mask_ack_irq该中断并退出就OK了，并不做具体的处理。另外正在处理该中断的CPU会检查pending状态，并进行处理的。
+			//同样的，如果该中断被其他的CPU disable了，本就不应该继续执行该中断的specific handler，我们也是设定pending状态，mask and ack中断就退出了
+			//当其他CPU的代码离开临界区，enable 该中断的时候，软件会检测pending状态并resend该中断。
 			desc->istate |= IRQS_PENDING;
 			mask_ack_irq(desc);
 			goto out_unlock;

@@ -1233,7 +1233,7 @@ static void __init devicemaps_init(const struct machine_desc *mdesc)
 	/*
 	 * Allocate the vector page early.
 	 */
-	vectors = early_alloc(PAGE_SIZE * 2);
+	vectors = early_alloc(PAGE_SIZE * 2);//分配两个page的物理页帧
 
 	early_trap_init(vectors);
 

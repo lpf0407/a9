@@ -886,6 +886,14 @@ void __init early_trap_init(void *vectors_base)
 	 * ISAs.  The Thumb version is an undefined instruction with a
 	 * branch back to the undefined instruction.
 	 */
+	/*
+	 * 将整个vector table那个page frame填充成未定义的指令。
+	 * 起始vector table加上kuser helper函数并不能完全的充满
+	 * 这个page，有些缝隙。如果不这么处理，当极端情况下（程
+	 * 序错误或者HW的issue），CPU可能从这些缝隙中取指执行，
+	 * 从而导致不可知的后果。如果将这些缝隙填充未定义指令，
+	 * 那么CPU可以捕获这种异常
+	 */
 	for (i = 0; i < PAGE_SIZE / sizeof(u32); i++)
 		((u32 *)vectors_base)[i] = 0xe7fddef1;
 

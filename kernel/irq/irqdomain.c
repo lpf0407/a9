@@ -163,6 +163,12 @@ EXPORT_SYMBOL_GPL(irq_domain_add_simple);
  * for all legacy interrupts except 0 (which is always the invalid irq for
  * a legacy controller).
  */
+//很遗憾，在GIC的代码中没有调用标准的注册irq domain的接口函数。要了解其背后的原因，
+//我们需要回到过去。在旧的linux kernel中，ARM体系结构的代码不甚理想。在arch/arm目录
+//充斥了很多board specific的代码，其中定义了很多具体设备相关的静态表格，这些表格规定
+//了各个device使用的资源，当然，其中包括IRQ资源。在这种情况下，各个外设的IRQ是固定的
+//（如果作为驱动程序员的你足够老的话，应该记得很长篇幅的针对IRQ number的宏定义），
+//也就是说，HW interrupt ID和IRQ number的关系是固定的。一旦关系固定，我们就可以在interupt controller的代码中创建这些映射关系
 struct irq_domain *irq_domain_add_legacy(struct device_node *of_node,
 					 unsigned int size,
 					 unsigned int first_irq,

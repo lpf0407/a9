@@ -55,17 +55,27 @@ union gic_base {
 };
 
 struct gic_chip_data {
-	union gic_base dist_base;
-	union gic_base cpu_base;
-#ifdef CONFIG_CPU_PM
+	union gic_base dist_base;//GIC Distributor的基地址空间
+	union gic_base cpu_base;//GIC CPU interface的基地址空间
+#ifdef CONFIG_CPU_PM //GIC 电源管理相关的成员 
 	u32 saved_spi_enable[DIV_ROUND_UP(1020, 32)];
 	u32 saved_spi_conf[DIV_ROUND_UP(1020, 16)];
 	u32 saved_spi_target[DIV_ROUND_UP(1020, 4)];
 	u32 __percpu *saved_ppi_enable;
 	u32 __percpu *saved_ppi_conf;
 #endif
-	struct irq_domain *domain;
-	unsigned int gic_irqs;
+	struct irq_domain *domain;//该GIC对应的irq domain数据结构
+	unsigned int gic_irqs;//GIC支持的IRQ的数目
+	//对于GIC支持的IRQ的数目，这里还要赘述几句。实际上并非GIC支持
+	//多少个HW interrupt ID，其就支持多少个IRQ。对于SGI，其处理比
+	//较特别，并不归入IRQ number中。因此，对于GIC而言，其SGI（从0
+	//到15的那些HW interrupt ID）不需要irq domain进行映射处理，也
+	//就是说SGI没有对应的IRQ number。如果系统越来越复杂，一个GIC不i
+	//能支持所有的interrupt source（目前GIC支持1020个中断源，这个数目
+	//已经非常的大了），那么系统还需要引入secondary GIC，这个GIC主要负
+	//责扩展外设相关的interrupt source，也就是说，secondary GIC的SGI和
+	//PPI都变得冗余了（这些功能，primary GIC已经提供了）。这些信息可以
+	//协助理解代码中的hwirq_base的设定。
 #ifdef CONFIG_GIC_NON_BANKED
 	void __iomem *(*get_base)(union gic_base *);
 #endif
@@ -382,8 +392,8 @@ static void __init gic_dist_init(struct gic_chip_data *gic)
 {
 	unsigned int i;
 	u32 cpumask;
-	unsigned int gic_irqs = gic->gic_irqs;
-	void __iomem *base = gic_data_dist_base(gic);
+	unsigned int gic_irqs = gic->gic_irqs;//获取该GIC支持的IRQ的数目 
+	void __iomem *base = gic_data_dist_base(gic);//获取该GIC对应的Distributor基地址
 
 	writel_relaxed(0, base + GIC_DIST_CTRL);
 
@@ -940,6 +950,8 @@ void __init gic_init_bases(unsigned int gic_nr, int irq_start,
 
 	BUG_ON(gic_nr >= MAX_GIC_NR);
 
+	//gic_nr标识GIC number，等于0就是root GIC。hwirq的意思就是GIC上的HW interrupt ID，
+	//并不是GIC上的每个interrupt ID都有map到linux IRQ framework中的一个IRQ number，
 	gic = &gic_data[gic_nr];
 #ifdef CONFIG_GIC_NON_BANKED
 	if (percpu_offset) { /* Frankein-GIC without banked registers... */
@@ -992,6 +1004,10 @@ void __init gic_init_bases(unsigned int gic_nr, int irq_start,
 	} else {
 		hwirq_base = 32;
 	}
+	//对于SGI，是属于软件中断，用于CPU之间通信，没有必要进行HW interrupt ID到IRQ number的mapping。
+	//变量hwirq_base表示该GIC上要进行map的base ID，hwirq_base = 16也就意味着忽略掉16个SGI。
+	//对于系统中其他的GIC，其PPI也没有必要mapping，因此hwirq_base = 32。
+	//在本场景中，irq_start ＝ -1，表示不指定IRQ number。有些场景会指定IRQ number，这时候，需要对IRQ number进行一个对齐的操作
 
 	/*
 	 * Find out how many interrupts are supported.
@@ -999,16 +1015,27 @@ void __init gic_init_bases(unsigned int gic_nr, int irq_start,
 	 */
 	gic_irqs = readl_relaxed(gic_data_dist_base(gic) + GIC_DIST_CTR) & 0x1f;
 	gic_irqs = (gic_irqs + 1) * 32;
+	//变量gic_irqs保存了该GIC支持的最大的中断数目。该信息是从GIC_DIST_CTR寄存器（这是V1版本的寄存器名字，V2中是GICD_TYPER，
+	//Interrupt Controller Type Register,）的低五位ITLinesNumber获取的。如果ITLinesNumber等于N，那么最大支持的中断数目是32(N+1)。
+	//此外，GIC规范规定最大的中断数目不能超过1020，1020-1023是有特别用户的interrupt ID
 	if (gic_irqs > 1020)
 		gic_irqs = 1020;
 	gic->gic_irqs = gic_irqs;
 
 	gic_irqs -= hwirq_base; /* calculate # of irqs to allocate */
+	//减去不需要map（不需要分配IRQ）的那些interrupt ID，OK，这时候gic_irqs的数值终于和它的名字一致了。gic_irqs从字面上看不就是该GIC需要分配的IRQ number的数目吗
 
+	//of_property_read_u32函数把arm,routable-irqs的属性值读出到nr_routable_irqs变量中，如果正确返回0。
+	//在有些SOC的设计中，外设的中断请求信号线不是直接接到GIC，而是通过crossbar/multiplexer这个的HW block连接到GIC上。
+	//arm,routable-irqs这个属性用来定义那些不直接连接到GIC的中断请求数目
 	if (of_property_read_u32(node, "arm,routable-irqs",
 				 &nr_routable_irqs)) {
 		irq_base = irq_alloc_descs(irq_start, 16, gic_irqs,
 					   numa_node_id());
+		//对于那些直接连接到GIC的情况，我们需要通过调用irq_alloc_descs分配中断描述符。如果irq_start大于0，
+		//那么说明是指定IRQ number的分配，对于我们这个场景，irq_start等于-1，因此不指定IRQ 号。如果不指定
+		//IRQ number的，就需要搜索，第二个参数16就是起始搜索的IRQ number。gic_irqs指明要分配的irq number的
+		//数目。如果没有正确的分配到中断描述符，程序会认为可能是之前已经准备好了
 		if (IS_ERR_VALUE(irq_base)) {
 			WARN(1, "Cannot allocate irq_descs @ IRQ%d, assuming pre-allocated\n",
 			     irq_start);
@@ -1022,20 +1049,37 @@ void __init gic_init_bases(unsigned int gic_nr, int irq_start,
 						    &gic_irq_domain_ops,
 						    gic);
 	}
+	//这段代码主要是向系统中注册一个irq domain的数据结构。为何需要struct irq_domain这样一个数据结构呢？
+	//从linux kernel的角度来看，任何外部的设备的中断都是一个异步事件，kernel都需要识别这个事件。在内核中，
+	//用IRQ number来标识某一个设备的某个interrupt request。有了IRQ number就可以定位到该中断的描述符（struct irq_desc）。
+	//但是，对于中断控制器而言，它不并知道IRQ number，它只是知道HW interrupt number（中断控制器会为其支持的interrupt source
+	//进行编码，这个编码被称为Hardware interrupt number ）。不同的软件模块用不同的ID来识别interrupt source，这样就需要映射了。
+	//如何将Hardware interrupt number 映射到IRQ number呢？这需要一个translation object，内核定义为struct irq_domain。
 
+	//每个interrupt controller都会形成一个irq domain，负责解析其下游的interrut source。如果interrupt controller有级联的情况，
+	//那么一个非root interrupt controller的中断控制器也是其parent irq domain的一个普通的interrupt source
+	//
+	//
+	//irq domain的概念是一个通用中断子系统的概念，在具体的irq chip driver这个层次，我们需要一些解析GIC binding，
+	//创建IRQ number和HW interrupt ID的mapping的callback函数，
 	if (WARN_ON(!gic->domain))
 		return;
 
 	if (gic_nr == 0) {
 #ifdef CONFIG_SMP
 		set_smp_cross_call(gic_raise_softirq);
+		//set_smp_cross_call这个函数看名字也知道它的含义，就是设定一个多个CPU直接通信的callback函数。当一个CPU core上的软
+		//件控制行为需要传递到其他的CPU上的时候（例如在某一个CPU上运行的进程调用了系统调用进行reboot），就会调用这个callback函
+		//数。对于GIC，这个callback定义为gic_raise_softirq。这个函数名字起的不好，直观上以为是和softirq相关，实际上其实是触发了IPI中断
 		register_cpu_notifier(&gic_cpu_notifier);
+		//在multi processor环境下，当processor状态发送变化的时候（例如online，offline），需要把这些事件通知到GIC。而GIC driver在收到
+		//来自CPU的事件后会对cpu interface进行相应的设定
 #endif
-		set_handle_irq(gic_handle_irq);
+		set_handle_irq(gic_handle_irq);//设定arch相关的irq handler
 	}
 
 	gic_chip.flags |= gic_arch_extn.flags;
-	gic_dist_init(gic);
+	gic_dist_init(gic);//具体硬件初始化
 	gic_cpu_init(gic);
 	gic_pm_init(gic);
 }
@@ -1046,6 +1090,7 @@ static int gic_cnt __initdata;
 static int __init
 gic_of_init(struct device_node *node, struct device_node *parent)
 {
+	//node参数代表需要初始化的那个interrupt controller的device node，parent参数指向其parent
 	void __iomem *cpu_base;
 	void __iomem *dist_base;
 	u32 percpu_offset;
@@ -1054,22 +1099,32 @@ gic_of_init(struct device_node *node, struct device_node *parent)
 	if (WARN_ON(!node))
 		return -ENODEV;
 
-	dist_base = of_iomap(node, 0);
+	dist_base = of_iomap(node, 0);//映射GIC Distributor的寄存器地址空间
 	WARN(!dist_base, "unable to map gic dist registers\n");
 
-	cpu_base = of_iomap(node, 1);
+	cpu_base = of_iomap(node, 1);//映射GIC CPU interface的寄存器地址空间
 	WARN(!cpu_base, "unable to map gic cpu registers\n");
 
-	if (of_property_read_u32(node, "cpu-offset", &percpu_offset))
+	if (of_property_read_u32(node, "cpu-offset", &percpu_offset))//处理cpu-offset属性
 		percpu_offset = 0;
+	//cpu-offset属性，首先要了解什么是banked register。所谓banked register就是在一个地
+	//址上提供多个寄存器副本。比如说系统中有四个CPU，这些CPU访问某个寄存器的时候地址是
+	//一样的，但是对于banked register，实际上，不同的CPU访问的是不同的寄存器，虽然它们
+	//的地址是一样的。如果GIC没有banked register，那么需要提供根据CPU index给出一系列
+	//地址偏移，而地址偏移=cpu-offset * cpu-nr
 
-	gic_init_bases(gic_cnt, -1, dist_base, cpu_base, percpu_offset, node);
+	gic_init_bases(gic_cnt, -1, dist_base, cpu_base, percpu_offset, node);//主处理过程，后面详述
 	if (!gic_cnt)
-		gic_init_physaddr(node);
+		gic_init_physaddr(node);//对于不支持big.LITTLE switcher（CONFIG_BL_SWITCHER）的系统，该函数为空。
 
-	if (parent) {
-		irq = irq_of_parse_and_map(node, 0);
+	if (parent) {//处理interrupt级联 
+		irq = irq_of_parse_and_map(node, 0);//解析second GIC的interrupts属性，并进行mapping，返回IRQ number 
 		gic_cascade_irq(gic_cnt, irq);
+		//interrupt controller可以级联。对于root GIC，其传入的parent是NULL，因此不会执行级联部分的代码。
+		//对于second GIC，它是作为其parent（root GIC）的一个普通的irq source，因此，也需要注册该IRQ的handler。
+		//由此可见，非root的GIC的初始化分成了两个部分：一部分是作为一个interrupt controller，执行和root GIC一
+		//样的初始化代码。另外一方面，GIC又作为一个普通的interrupt generating device，需要象一个普通的设备驱动
+		//一样，注册其中断handler。理解irq_of_parse_and_map需要irq domain的知识，
 	}
 	gic_cnt++;
 	return 0;

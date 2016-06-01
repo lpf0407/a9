@@ -417,7 +417,7 @@ void notrace cpu_init(void)
 {
 #ifndef CONFIG_CPU_V7M
 	unsigned int cpu = smp_processor_id();
-	struct stack *stk = &stacks[cpu];
+	struct stack *stk = &stacks[cpu];//异常模式栈
 
 	if (cpu >= NR_CPUS) {
 		pr_crit("CPU%u: bad primary CPU number\n", cpu);
@@ -457,15 +457,19 @@ void notrace cpu_init(void)
 	"mov	sp, r14\n\t"
 	"msr	cpsr_c, %7"
 	    :
-	    : "r" (stk),
-	      PLC (PSR_F_BIT | PSR_I_BIT | IRQ_MODE),
-	      "I" (offsetof(struct stack, irq[0])),
+	    : "r" (stk),//%0
+	      PLC (PSR_F_BIT | PSR_I_BIT | IRQ_MODE),//%1
+	      "I" (offsetof(struct stack, irq[0])),//%2
 	      PLC (PSR_F_BIT | PSR_I_BIT | ABT_MODE),
 	      "I" (offsetof(struct stack, abt[0])),
 	      PLC (PSR_F_BIT | PSR_I_BIT | UND_MODE),
 	      "I" (offsetof(struct stack, und[0])),
 	      PLC (PSR_F_BIT | PSR_I_BIT | SVC_MODE)
 	    : "r14");
+	//asm(code : output operand list : input operand list : clobber list);
+	//在input operand list中，有两种限制符（constraint），"r"或者"I"，"I"表示立即数（Immediate operands），
+	//"r"表示用通用寄存器传递参数。
+	//clobber list中有一个r14，表示在汇编代码中修改了r14的值
 #endif
 }
 
