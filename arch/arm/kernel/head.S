@@ -161,7 +161,7 @@ ENDPROC(stext)
  *  r4 = page table (see ARCH_PGD_SHIFT in asm/memory.h)
  */
 __create_page_tables:
-	pgtbl	r4, r8				@ page table address
+	pgtbl	r4, r8				@ page table address kernel 的位置在物理内存起始地址+0x8000的地方，页目录的位置在kernel位置- 0x4000的地方。
 
 	/*
 	 * Clear the swapper page table

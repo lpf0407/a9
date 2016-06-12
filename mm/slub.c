@@ -2988,7 +2988,7 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 	 * place the free pointer at word boundaries and this determines
 	 * the possible location of the free pointer.
 	 */
-	size = ALIGN(size, sizeof(void *));
+	size = ALIGN(size, sizeof(void *));//对象大小sizeof(void*)
 
 #ifdef CONFIG_SLUB_DEBUG
 	/*
@@ -3016,7 +3016,7 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 	 * With that we have determined the number of bytes in actual use
 	 * by the object. This is the potential offset to the free pointer.
 	 */
-	s->inuse = size;
+	s->inuse = size;///*  Offset to metadata */
 
 	if (((flags & (SLAB_DESTROY_BY_RCU | SLAB_POISON)) ||
 		s->ctor)) {

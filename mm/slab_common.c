@@ -203,8 +203,8 @@ kmem_cache_create(const char *name, size_t size, size_t align,
 	char *cache_name;
 	int err;
 
-	get_online_cpus();
-	get_online_mems();
+	get_online_cpus();/* 关掉内核抢占，防并发访问,并且给CPU引用计数+1*/
+	get_online_mems();//hotplug相关
 
 	mutex_lock(&slab_mutex);
 
@@ -218,7 +218,7 @@ kmem_cache_create(const char *name, size_t size, size_t align,
 	 * case, and we'll just provide them with a sanitized version of the
 	 * passed flags.
 	 */
-	flags &= CACHE_CREATE_MASK;
+	flags &= CACHE_CREATE_MASK;/* 设置过干净的基本的标志后开始进行分配操作了*/
 
 	s = __kmem_cache_alias(name, size, align, flags, ctor);
 	if (s)

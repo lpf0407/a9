@@ -297,20 +297,20 @@ static int gic_set_wake(struct irq_data *d, unsigned int on)
 static void __exception_irq_entry gic_handle_irq(struct pt_regs *regs)
 {
 	u32 irqstat, irqnr;
-	struct gic_chip_data *gic = &gic_data[0];
-	void __iomem *cpu_base = gic_data_cpu_base(gic);
+	struct gic_chip_data *gic = &gic_data[0];//获取root GIC的硬件描述符 
+	void __iomem *cpu_base = gic_data_cpu_base(gic);//获取root GIC mapping到CPU地址空间的信息
 
 	do {
-		irqstat = readl_relaxed(cpu_base + GIC_CPU_INTACK);
+		irqstat = readl_relaxed(cpu_base + GIC_CPU_INTACK);//获取HW interrupt ID
 		irqnr = irqstat & GICC_IAR_INT_ID_MASK;
 
-		if (likely(irqnr > 15 && irqnr < 1021)) {
-			irqnr = irq_find_mapping(gic->domain, irqnr);
-			handle_IRQ(irqnr, regs);
+		if (likely(irqnr > 15 && irqnr < 1021)) {//SPI和PPI的处理
+			irqnr = irq_find_mapping(gic->domain, irqnr);//将HW interrupt ID转成IRQ number 
+			handle_IRQ(irqnr, regs);//处理该IRQ number
 			continue;
 		}
 		if (irqnr < 16) {
-			writel_relaxed(irqstat, cpu_base + GIC_CPU_EOI);
+			writel_relaxed(irqstat, cpu_base + GIC_CPU_EOI);//IPI类型的中断处理 
 #ifdef CONFIG_SMP
 			handle_IPI(irqnr, regs);
 #endif
@@ -376,6 +376,19 @@ static u8 gic_get_cpumask(struct gic_chip_data *gic)
 
 	for (i = mask = 0; i < 32; i += 4) {
 		mask = readl_relaxed(base + GIC_DIST_TARGET + i);
+		//每个GIC上的interrupt ID都有8个bit来控制送达的target CPU
+		//GIC_DIST_TARGETn（Interrupt Processor Targets Registers）
+		//位于Distributor HW block中，能控制送达的CPU interface，
+		//并不是具体的CPU，如果具体的实现中CPU interface和CPU是严
+		//格按照上图中那样一一对应，那么GIC_DIST_TARGET送达了CPU Interface n，
+		//也就是送达了CPU n。当然现实未必如你所愿，那么怎样来获取这个CPU的mask呢？
+		//我们知道SGI和PPI不需要使用GIC_DIST_TARGET控制target CPU。SGI送达目标CPU
+		//有自己特有的寄存器来控制（Software Generated Interrupt Register），对于
+		//PPI，其是CPU私有的，因此不需要控制target CPU。GIC_DIST_TARGET0～GIC_DIST_TARGET7是
+		//控制0～31这32个interrupt ID（SGI和PPI）的target CPU的，但是实际上SGI和PPI是不需要
+		//控制target CPU的，因此，这些寄存器是read only的，读取这些寄存器返回的就是cpu mask值。
+		//假设CPU0接在CPU interface 4上，那么运行在CPU 0上的程序在读GIC_DIST_TARGET0～GIC_DIST_TARGET7的时候，返回的就是0b00010000
+		//
 		mask |= mask >> 16;
 		mask |= mask >> 8;
 		if (mask)
@@ -396,6 +409,11 @@ static void __init gic_dist_init(struct gic_chip_data *gic)
 	void __iomem *base = gic_data_dist_base(gic);//获取该GIC对应的Distributor基地址
 
 	writel_relaxed(0, base + GIC_DIST_CTRL);
+	//Distributor Control Register用来控制全局的中断forward情况。写入0表示Distributor
+	//不向CPU interface发送中断请求信号，也就disable了全部的中断请求（group 0和group 1）
+	//，CPU interace再也收不到中断请求信号了。在初始化的最后，step（f）那里会进行enable的动
+	//作（这里只是enable了group 0的中断）。在初始化代码中，并没有设定interrupt source的group
+	//（寄存器是GIC_DIST_IGROUP），我相信缺省值就是设定为group 0的。
 
 	/*
 	 * Set all global interrupts to be level triggered, active low.
@@ -406,6 +424,7 @@ static void __init gic_dist_init(struct gic_chip_data *gic)
 	/*
 	 * Set all global interrupts to this CPU only.
 	 */
+
 	cpumask = gic_get_cpumask(gic);
 	cpumask |= cpumask << 8;
 	cpumask |= cpumask << 16;
@@ -652,7 +671,11 @@ static void __init gic_pm_init(struct gic_chip_data *gic)
 	gic->saved_ppi_conf = __alloc_percpu(DIV_ROUND_UP(32, 16) * 4,
 		sizeof(u32));
 	BUG_ON(!gic->saved_ppi_conf);
-
+//主要是分配两个per cpu的内存。这些内存在系统进入sleep状态的时候保存PPI
+//的寄存器状态信息，在resume的时候，写回寄存器。对于root GIC，需要注册
+//一个和电源管理的事件通知callback函数。不得不吐槽一下gic_notifier_block和gic_notifier
+//这两个符号的命名，看不出来和电源管理有任何关系。更优雅的名字应该包括pm这样的符号，
+//以便让其他工程师看到名字就立刻知道是和电源管理相关的。
 	if (gic == &gic_data[0])
 		cpu_pm_register_notifier(&gic_notifier_block);
 }
@@ -826,22 +849,28 @@ void __init gic_init_physaddr(struct device_node *node)
 #else
 #define gic_init_physaddr(node)  do { } while (0)
 #endif
-
+//建IRQ number和GIC hw interrupt ID之间映射关系的时候，需要调用该回调函数
 static int gic_irq_domain_map(struct irq_domain *d, unsigned int irq,
 				irq_hw_number_t hw)
 {
-	if (hw < 32) {
+	if (hw < 32) {//PPI and SGI
+		//分配per cpu的内存，设定一些per cpu的flag。
 		irq_set_percpu_devid(irq);
+		//设定该中断描述符的irq chip和high level的handler
 		irq_set_chip_and_handler(irq, &gic_chip,
 					 handle_percpu_devid_irq);
+		//设定irq flag是有效的（因为已经设定好了chip和handler了），并且request后不是auto enable的
 		set_irq_flags(irq, IRQF_VALID | IRQF_NOAUTOEN);
 	} else {
+		//对于SPI，设定的high level irq event handler是handle_fasteoi_irq。对于SPI，是可以probe，并且request后是auto enable的
 		irq_set_chip_and_handler(irq, &gic_chip,
 					 handle_fasteoi_irq);
 		set_irq_flags(irq, IRQF_VALID | IRQF_PROBE);
 
+		//有些SOC会在各种外设中断和GIC之间增加cross bar（例如TI的OMAP芯片），这里是为那些ARM SOC准备的
 		gic_routable_irq_domain_ops->map(d, irq, hw);
 	}
+	//设定irq chip的私有数据 
 	irq_set_chip_data(irq, d->host_data);
 	return 0;
 }
@@ -850,7 +879,8 @@ static void gic_irq_domain_unmap(struct irq_domain *d, unsigned int irq)
 {
 	gic_routable_irq_domain_ops->unmap(d, irq);
 }
-
+//除了标准的属性之外，各个具体的interrupt controller可以定义自己的device binding
+//些device bindings都需在irq chip driver这个层面进行解析。要给定某个外设的device tree node 和interrupt specifier，该函数可以解码出该设备使用的hw interrupt ID和linux irq type value 
 static int gic_irq_domain_xlate(struct irq_domain *d,
 				struct device_node *controller,
 				const u32 *intspec, unsigned int intsize,
