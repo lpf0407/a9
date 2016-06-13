@@ -333,6 +333,8 @@ struct zone {
 	 * When free pages are below this point, additional steps are taken
 	 * when reading the number of free pages to avoid per-cpu counter
 	 * drift allowing watermarks to be breached
+	 * 当空闲页的数量小于该值时，为了避免因为per-cpu counter漂移而导致突破水位线
+	 * 在读取空闲页数量时需要采取额外步骤
 	 */
 	unsigned long percpu_drift_mark;
 
@@ -353,17 +355,25 @@ struct zone {
 	unsigned long		dirty_balance_reserve;
 
 #ifdef CONFIG_NUMA
-	int node;
+	int node;/*  所属的NUMA节点 */
 	/*
 	 * zone reclaim becomes active if more unmapped pages exist.
 	 */
-	unsigned long		min_unmapped_pages;
-	unsigned long		min_slab_pages;
+	unsigned long		min_unmapped_pages;//未映射的页（即可回收的页）超过此值，将进行页面回收
+	unsigned long		min_slab_pages;//管理区中用于slab的可回收页大于此值时，将回收slab中的缓存页
 #endif
-	struct per_cpu_pageset __percpu *pageset;
+	/*   
+	 * 每CPU的页面缓存。  
+	 * 当分配单个页面时，首先从该缓存中分配页面。这样可以:  
+	 * 避免使用全局的锁  
+	 * 避免同一个页面反复被不同的CPU分配，引起缓存页的失效。  
+	 * 避免将管理区中的大块分割成碎片。  
+	 */ 
+	struct per_cpu_pageset __percpu *pageset;//
 	/*
 	 * free areas of different sizes
 	 */
+	/*  该锁用于保护伙伴系统数据结构。即保护free_area相关数据 */
 	spinlock_t		lock;
 #if defined CONFIG_COMPACTION || defined CONFIG_CMA
 	/* Set to true when the PG_migrate_skip bits should be cleared */
@@ -376,8 +386,11 @@ struct zone {
 #endif
 #ifdef CONFIG_MEMORY_HOTPLUG
 	/* see spanned/present_pages for more description */
+	/*  用于保护spanned/present_pages等变量。这些变量几乎不会发生变化，除非发生了内存热插拨操作。  
+	 * 这几个变量并不被lock字段保护。并且主要用于读，因此使用读写锁 */
 	seqlock_t		span_seqlock;
 #endif
+	/*  伙伴系统的主要变量。这个数组定义了11个队列，每个队列中的元素都是大小为2^n的页面 */
 	struct free_area	free_area[MAX_ORDER];
 
 #ifndef CONFIG_SPARSEMEM
@@ -390,6 +403,7 @@ struct zone {
 
 #ifdef CONFIG_COMPACTION
 	/*
+	 * 用于内存压缩
 	 * On compaction failure, 1<<compact_defer_shift compactions
 	 * are skipped before trying again. The number attempted since
 	 * last failure is tracked with compact_considered.

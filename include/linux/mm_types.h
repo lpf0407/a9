@@ -52,6 +52,9 @@ struct page {
 						 * memory, low bit is set, and
 						 * it points to anon_vma object:
 						 * see PAGE_MAPPING_ANON below.
+						 * 如果低端bit清除，则指向inode地址空间，或者为null.
+						 * 如果页面被映射为匿名内存，低端bit设置，则指向
+						 * anon_vma对象，参看PAGE_MAPPING_ANON
 						 */
 		void *s_mem;			/* slab first object */
 	};
@@ -59,7 +62,7 @@ struct page {
 	/* Second double word */
 	struct {
 		union {
-			pgoff_t index;		/* Our offset within mapping. */
+			pgoff_t index;		/* Our offset within mapping.如果是文件映射，那么表示本页面在文件中的位置(偏移) */
 			void *freelist;		/* sl[aou]b first free object */
 			bool pfmemalloc;	/* If set by the page allocator,
 						 * ALLOC_NO_WATERMARKS was set
