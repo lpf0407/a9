@@ -63,10 +63,10 @@ static inline void arch_spin_lock(arch_spinlock_t *lock)
 
 	prefetchw(&lock->slock);
 	__asm__ __volatile__(
-"1:	ldrex	%0, [%3]\n"
-"	add	%1, %0, %4\n"
-"	strex	%2, %1, [%3]\n"
-"	teq	%2, #0\n"
+"1:	ldrex	%0, [%3]\n"////将(lock->slock)的值保存到slock
+"	add	%1, %0, %4\n"//(lock->slock).next = next + 1
+"	strex	%2, %1, [%3]\n"//将(lock->slock)的值回写到内存；tmp保存返回值，
+"	teq	%2, #0\n"//tmp中的值为0执行成功，否则失败
 "	bne	1b"
 	: "=&r" (lockval), "=&r" (newval), "=&r" (tmp)
 	: "r" (&lock->slock), "I" (1 << TICKET_SHIFT)
@@ -88,11 +88,11 @@ static inline int arch_spin_trylock(arch_spinlock_t *lock)
 	prefetchw(&lock->slock);
 	do {
 		__asm__ __volatile__(
-		"	ldrex	%0, [%3]\n"
-		"	mov	%2, #0\n"
-		"	subs	%1, %0, %0, ror #16\n"
-		"	addeq	%0, %0, %4\n"
-		"	strexeq	%2, %0, [%3]"
+		"	ldrex	%0, [%3]\n"//将(lock->slock)的值保存到slock
+		"	mov	%2, #0\n"//将0赋值给res
+		"	subs	%1, %0, %0, ror #16\n"//循环右移16位，低16位为next ,高16为owner,contended =  |owner|next| - |next|owner|
+		"	addeq	%0, %0, %4\n"//如果上一步中相减的结果为0，next = next + 1;获得锁，否则无法获得锁
+		"	strexeq	%2, %0, [%3]"//将锁的结果写入(lock->slock)中,res保存返回结果
 		: "=&r" (slock), "=&r" (contended), "=&r" (res)
 		: "r" (&lock->slock), "I" (1 << TICKET_SHIFT)
 		: "cc");
@@ -100,9 +100,9 @@ static inline int arch_spin_trylock(arch_spinlock_t *lock)
 
 	if (!contended) {
 		smp_mb();
-		return 1;
+		return 1;//可以获得锁
 	} else {
-		return 0;
+		return 0;//无法获得锁
 	}
 }
 

@@ -15,8 +15,8 @@ typedef struct {
 			u16 next;
 			u16 owner;
 #else
-			u16 owner;
-			u16 next;
+			u16 owner;//当前锁的持有者
+			u16 next;//下个申请锁的人
 #endif
 		} tickets;
 	};
